@@ -2,3 +2,4 @@ pyautogui
 requests
 supabase
 crewai
+pyttsx3

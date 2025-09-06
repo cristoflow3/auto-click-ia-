@@ -1,6 +1,7 @@
 # auto-click-ia-
 
 Aplicación sencilla para Windows que combina Python, OpenRouter, CrewAI y Supabase.
+Incluye un agente conversacional que contesta por voz y texto y delega tareas a CrewAI.
 
 ## Requisitos
 
@@ -18,8 +19,8 @@ python main.py
 
 La interfaz permite definir el intervalo de clics y un mensaje para la IA.
 Al iniciar, el programa:
-1. Consulta OpenRouter con el mensaje proporcionado.
-2. Lanza una pequeña conversación multiagente con CrewAI (Planificador y Ejecutor).
+1. Consulta OpenRouter con el mensaje proporcionado y responde en pantalla y voz.
+2. Usa esa respuesta como tarea para CrewAI (Planificador y Ejecutor).
 3. Repite clics automáticos con `pyautogui`.
 4. Registra acciones en Supabase si está configurado.
 

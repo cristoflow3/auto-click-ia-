@@ -5,6 +5,7 @@ import tkinter as tk
 
 import pyautogui
 import requests
+import pyttsx3
 from supabase import create_client
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
@@ -22,11 +23,20 @@ supabase_client = (
     else None
 )
 
+conversation = [{"role": "system", "content": "Eres un asistente útil."}]
+
+try:
+    tts_engine = pyttsx3.init()
+except Exception:
+    tts_engine = None
+
 
 def query_openrouter(prompt: str) -> str:
-    """Send a simple prompt to OpenRouter and return the response text."""
+    """Send a conversational prompt to OpenRouter and return the response."""
     if not OPENROUTER_API_KEY:
         return "OpenRouter key not configured."
+
+    conversation.append({"role": "user", "content": prompt})
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -34,7 +44,7 @@ def query_openrouter(prompt: str) -> str:
     }
     data = {
         "model": "openai/gpt-3.5-turbo",
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": conversation,
     }
     try:
         response = requests.post(
@@ -44,9 +54,21 @@ def query_openrouter(prompt: str) -> str:
             timeout=30,
         )
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
+        reply = response.json()["choices"][0]["message"]["content"].strip()
+        conversation.append({"role": "assistant", "content": reply})
+        return reply
     except Exception as exc:
         return f"OpenRouter error: {exc}"
+
+
+def speak(text: str) -> None:
+    """Speak text aloud if a TTS engine is available."""
+    if tts_engine:
+        try:
+            tts_engine.say(text)
+            tts_engine.runAndWait()
+        except Exception:
+            pass
 
 
 def log_action(action: str) -> None:
@@ -122,8 +144,9 @@ class AutoClickApp:
         if prompt:
             reply = query_openrouter(prompt)
             self.output.insert(tk.END, f"IA: {reply}\n")
+            speak(reply)
             log_action(f"prompt: {prompt}")
-            crew_msg = run_multiagent_task(prompt)
+            crew_msg = run_multiagent_task(reply)
             self.output.insert(tk.END, f"CrewAI: {crew_msg}\n")
         while self.running:
             pyautogui.click()
