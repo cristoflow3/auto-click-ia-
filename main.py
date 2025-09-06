@@ -11,6 +11,11 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
+# Make CrewAI use OpenRouter if the key is provided
+if OPENROUTER_API_KEY:
+    os.environ.setdefault("OPENAI_API_KEY", OPENROUTER_API_KEY)
+    os.environ.setdefault("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
+
 supabase_client = (
     create_client(SUPABASE_URL, SUPABASE_KEY)
     if SUPABASE_URL and SUPABASE_KEY
@@ -53,14 +58,29 @@ def log_action(action: str) -> None:
             pass
 
 
-def crew_example() -> str:
-    """Demonstrate running a basic CrewAI agent."""
+def run_multiagent_task(task_description: str) -> str:
+    """Run a tiny multi-agent CrewAI example for the given task."""
     try:
-        from crewai import Agent, Crew
+        from crewai import Agent, Crew, Task
 
-        agent = Agent(name="Helper", instructions="Saluda al mundo")
-        crew = Crew(agents=[agent], tasks=["Di hola"], verbose=False)
-        return crew.kickoff()
+        planner = Agent(
+            role="Planificador",
+            goal="Diseñar un plan para la tarea dada",
+            backstory="Eres experto en descomponer problemas",
+        )
+        executor = Agent(
+            role="Ejecutor",
+            goal="Realizar la tarea siguiendo el plan",
+            backstory="Aplicas el plan paso a paso",
+        )
+
+        plan = Task(description=f"Planifica: {task_description}", agent=planner)
+        execute = Task(description="Ejecuta el plan anterior", agent=executor)
+
+        crew = Crew(agents=[planner, executor], tasks=[plan, execute], verbose=False)
+        result = crew.kickoff()
+        log_action(f"crew: {result}")
+        return result
     except Exception as exc:
         return f"CrewAI error: {exc}"
 
@@ -103,8 +123,7 @@ class AutoClickApp:
             reply = query_openrouter(prompt)
             self.output.insert(tk.END, f"IA: {reply}\n")
             log_action(f"prompt: {prompt}")
-        crew_msg = crew_example()
-        if crew_msg:
+            crew_msg = run_multiagent_task(prompt)
             self.output.insert(tk.END, f"CrewAI: {crew_msg}\n")
         while self.running:
             pyautogui.click()
