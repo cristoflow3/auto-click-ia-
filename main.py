@@ -1,0 +1,165 @@
+import os
+import threading
+import time
+import tkinter as tk
+
+import pyautogui
+import requests
+import pyttsx3
+from supabase import create_client
+
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+# Make CrewAI use OpenRouter if the key is provided
+if OPENROUTER_API_KEY:
+    os.environ.setdefault("OPENAI_API_KEY", OPENROUTER_API_KEY)
+    os.environ.setdefault("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
+
+supabase_client = (
+    create_client(SUPABASE_URL, SUPABASE_KEY)
+    if SUPABASE_URL and SUPABASE_KEY
+    else None
+)
+
+conversation = [{"role": "system", "content": "Eres un asistente útil."}]
+
+try:
+    tts_engine = pyttsx3.init()
+except Exception:
+    tts_engine = None
+
+
+def query_openrouter(prompt: str) -> str:
+    """Send a conversational prompt to OpenRouter and return the response."""
+    if not OPENROUTER_API_KEY:
+        return "OpenRouter key not configured."
+
+    conversation.append({"role": "user", "content": prompt})
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    data = {
+        "model": "openai/gpt-3.5-turbo",
+        "messages": conversation,
+    }
+    try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=30,
+        )
+        response.raise_for_status()
+        reply = response.json()["choices"][0]["message"]["content"].strip()
+        conversation.append({"role": "assistant", "content": reply})
+        return reply
+    except Exception as exc:
+        return f"OpenRouter error: {exc}"
+
+
+def speak(text: str) -> None:
+    """Speak text aloud if a TTS engine is available."""
+    if tts_engine:
+        try:
+            tts_engine.say(text)
+            tts_engine.runAndWait()
+        except Exception:
+            pass
+
+
+def log_action(action: str) -> None:
+    """Store a simple log entry in Supabase if configured."""
+    if supabase_client:
+        try:
+            supabase_client.table("logs").insert({"action": action}).execute()
+        except Exception:
+            pass
+
+
+def run_multiagent_task(task_description: str) -> str:
+    """Run a tiny multi-agent CrewAI example for the given task."""
+    try:
+        from crewai import Agent, Crew, Task
+
+        planner = Agent(
+            role="Planificador",
+            goal="Diseñar un plan para la tarea dada",
+            backstory="Eres experto en descomponer problemas",
+        )
+        executor = Agent(
+            role="Ejecutor",
+            goal="Realizar la tarea siguiendo el plan",
+            backstory="Aplicas el plan paso a paso",
+        )
+
+        plan = Task(description=f"Planifica: {task_description}", agent=planner)
+        execute = Task(description="Ejecuta el plan anterior", agent=executor)
+
+        crew = Crew(agents=[planner, executor], tasks=[plan, execute], verbose=False)
+        result = crew.kickoff()
+        log_action(f"crew: {result}")
+        return result
+    except Exception as exc:
+        return f"CrewAI error: {exc}"
+
+
+class AutoClickApp:
+    def __init__(self, master: tk.Tk) -> None:
+        self.master = master
+        master.title("Auto Click AI")
+        self.running = False
+
+        tk.Label(master, text="Intervalo (s):").grid(row=0, column=0)
+        self.interval_entry = tk.Entry(master)
+        self.interval_entry.insert(0, "1.0")
+        self.interval_entry.grid(row=0, column=1)
+
+        tk.Label(master, text="Mensaje IA:").grid(row=1, column=0)
+        self.prompt_entry = tk.Entry(master)
+        self.prompt_entry.grid(row=1, column=1)
+
+        self.start_button = tk.Button(master, text="Iniciar", command=self.start)
+        self.start_button.grid(row=2, column=0)
+        self.stop_button = tk.Button(master, text="Detener", command=self.stop)
+        self.stop_button.grid(row=2, column=1)
+
+        self.output = tk.Text(master, height=8, width=50)
+        self.output.grid(row=3, column=0, columnspan=2)
+
+    def start(self) -> None:
+        if not self.running:
+            self.running = True
+            threading.Thread(target=self.run, daemon=True).start()
+
+    def stop(self) -> None:
+        self.running = False
+
+    def run(self) -> None:
+        interval = float(self.interval_entry.get())
+        prompt = self.prompt_entry.get().strip()
+        if prompt:
+            reply = query_openrouter(prompt)
+            self.output.insert(tk.END, f"IA: {reply}\n")
+            speak(reply)
+            log_action(f"prompt: {prompt}")
+            crew_msg = run_multiagent_task(reply)
+            self.output.insert(tk.END, f"CrewAI: {crew_msg}\n")
+        while self.running:
+            pyautogui.click()
+            log_action("click")
+            time.sleep(interval)
+
+
+def main() -> None:
+    root = tk.Tk()
+    app = AutoClickApp(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
+
